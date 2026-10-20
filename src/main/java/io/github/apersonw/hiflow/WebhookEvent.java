@@ -1,0 +1,61 @@
+package io.github.apersonw.hiflow;
+
+import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * HiFlow 推送的事件。同一事件可能重复推送（至少投递一次），请按 {@link #id()} 去重；不保证顺序，
+ * 需要最新状态时按 {@code instance().id()} 查询实例详情。
+ *
+ * @param instance 实例摘要（不含流程变量），流程事件总是有
+ * @param task     任务，只在 task.* 事件中有，否则为 null
+ * @param operator 触发事件的操作者
+ * @param data     原始数据（webhook.test 等非流程事件使用）
+ */
+public record WebhookEvent(String id, String type, OffsetDateTime createdAt, EventInstance instance, EventTask task,
+                           String operator, String comment, Map<String, Object> data) {
+    public static final String INSTANCE_STARTED = "instance.started";
+    public static final String INSTANCE_COMPLETED = "instance.completed";
+    public static final String INSTANCE_CANCELED = "instance.canceled";
+    public static final String TASK_CREATED = "task.created";
+    public static final String TASK_COMPLETED = "task.completed";
+    public static final String TASK_CANCELED = "task.canceled";
+    /** 任务的处理人变化（认领、转办），task().assignee() 为新处理人 */
+    public static final String TASK_ASSIGNED = "task.assigned";
+    /** 任务被退回，目标节点随后产生 task.created */
+    public static final String TASK_RETURNED = "task.returned";
+    /** 待办超时（节点配置 timeout.action = remind，每个待办一次） */
+    public static final String TASK_OVERDUE = "task.overdue";
+    public static final String WEBHOOK_TEST = "webhook.test";
+
+    static WebhookEvent from(Map<String, Object> m) {
+        var data = Models.vars(m, "data");
+        var in = Json.obj(data, "instance");
+        var t = Json.obj(data, "task");
+        return new WebhookEvent(Json.str(m, "id"), Json.str(m, "type"), Models.time(m, "created_at"),
+                in == null ? null : EventInstance.from(in), t == null ? null : EventTask.from(t),
+                Json.str(data, "operator"), Json.str(data, "comment"), data);
+    }
+
+    /** 事件中的实例摘要 */
+    public record EventInstance(long id, String definitionKey, int definitionVersion, String definitionName, String businessKey,
+                                String title, String starter, String status, OffsetDateTime startedAt, OffsetDateTime endedAt,
+                                String endReason) {
+        static EventInstance from(Map<String, Object> m) {
+            return new EventInstance(Json.num(m, "id"), Json.str(m, "definition_key"), (int) Json.num(m, "definition_version"),
+                    Json.str(m, "definition_name"), Json.str(m, "business_key"), Json.str(m, "title"), Json.str(m, "starter"),
+                    Json.str(m, "status"), Models.time(m, "started_at"), Models.time(m, "ended_at"), Json.str(m, "end_reason"));
+        }
+    }
+
+    /** 事件中的任务 */
+    public record EventTask(long id, String nodeId, String name, String assignee, List<String> candidates, String status,
+                            String operator, String comment, OffsetDateTime createdAt, OffsetDateTime completedAt) {
+        static EventTask from(Map<String, Object> m) {
+            return new EventTask(Json.num(m, "id"), Json.str(m, "node_id"), Json.str(m, "name"), Json.str(m, "assignee"),
+                    Models.strings(m, "candidates"), Json.str(m, "status"), Json.str(m, "operator"), Json.str(m, "comment"),
+                    Models.time(m, "created_at"), Models.time(m, "completed_at"));
+        }
+    }
+}
