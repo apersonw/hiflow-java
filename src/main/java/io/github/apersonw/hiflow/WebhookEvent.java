@@ -9,11 +9,12 @@ import java.util.Map;
  * 需要最新状态时按 {@code instance().id()} 查询实例详情。
  *
  * @param instance 实例摘要（不含流程变量），流程事件总是有
- * @param task     任务，只在 task.* 事件中有，否则为 null
+ * @param task     任务，在 task.* 与 cc.created 事件中有，否则为 null
+ * @param cc       抄送，只在 cc.created 事件中有，否则为 null
  * @param operator 触发事件的操作者
  * @param data     原始数据（webhook.test 等非流程事件使用）
  */
-public record WebhookEvent(String id, String type, OffsetDateTime createdAt, EventInstance instance, EventTask task,
+public record WebhookEvent(String id, String type, OffsetDateTime createdAt, EventInstance instance, EventTask task, EventCC cc,
                            String operator, String comment, Map<String, Object> data) {
     public static final String INSTANCE_STARTED = "instance.started";
     public static final String INSTANCE_COMPLETED = "instance.completed";
@@ -27,14 +28,26 @@ public record WebhookEvent(String id, String type, OffsetDateTime createdAt, Eve
     public static final String TASK_RETURNED = "task.returned";
     /** 待办超时（节点配置 timeout.action = remind，每个待办一次） */
     public static final String TASK_OVERDUE = "task.overdue";
+    /** 服务任务调用失败且重试已用尽（comment() 为失败原因），可在管理后台重试或代为完成 */
+    public static final String TASK_FAILED = "task.failed";
+    /** 产生抄送记录（每位被抄送人一个），cc() 为抄送信息，task() 为触发抄送的任务 */
+    public static final String CC_CREATED = "cc.created";
+    /** 待办的处理人在组织架构中已停用或不存在（每个待办一次，之后按目录配置交接） */
+    public static final String TASK_ASSIGNEE_INACTIVE = "task.assignee_inactive";
+    /** 处理人规则解析回调（发往客户端的回调地址，需同步响应），见 {@link ResolveRequest} */
+    public static final String RESOLVE_USERS = "resolve.users";
+    /** 服务任务调用回调（发往客户端的回调地址，需同步响应），见 {@link ServiceRequest} */
+    public static final String SERVICE_INVOKE = "service.invoke";
     public static final String WEBHOOK_TEST = "webhook.test";
 
     static WebhookEvent from(Map<String, Object> m) {
         var data = Models.vars(m, "data");
         var in = Json.obj(data, "instance");
         var t = Json.obj(data, "task");
+        var cc = Json.obj(data, "cc");
         return new WebhookEvent(Json.str(m, "id"), Json.str(m, "type"), Models.time(m, "created_at"),
                 in == null ? null : EventInstance.from(in), t == null ? null : EventTask.from(t),
+                cc == null ? null : EventCC.from(cc),
                 Json.str(data, "operator"), Json.str(data, "comment"), data);
     }
 
@@ -49,12 +62,19 @@ public record WebhookEvent(String id, String type, OffsetDateTime createdAt, Eve
         }
     }
 
+    /** 事件中的抄送 */
+    public record EventCC(long id, String user, String sender, String nodeId) {
+        static EventCC from(Map<String, Object> m) {
+            return new EventCC(Json.num(m, "id"), Json.str(m, "user"), Json.str(m, "sender"), Json.str(m, "node_id"));
+        }
+    }
+
     /** 事件中的任务 */
-    public record EventTask(long id, String nodeId, String name, String assignee, List<String> candidates, String status,
+    public record EventTask(long id, String nodeId, String name, String kind, String assignee, String delegatedFrom, List<String> candidates, String status,
                             String operator, String comment, OffsetDateTime createdAt, OffsetDateTime completedAt) {
         static EventTask from(Map<String, Object> m) {
-            return new EventTask(Json.num(m, "id"), Json.str(m, "node_id"), Json.str(m, "name"), Json.str(m, "assignee"),
-                    Models.strings(m, "candidates"), Json.str(m, "status"), Json.str(m, "operator"), Json.str(m, "comment"),
+            return new EventTask(Json.num(m, "id"), Json.str(m, "node_id"), Json.str(m, "name"), Json.str(m, "kind"),
+                    Json.str(m, "assignee"), Json.str(m, "delegated_from"), Models.strings(m, "candidates"), Json.str(m, "status"), Json.str(m, "operator"), Json.str(m, "comment"),
                     Models.time(m, "created_at"), Models.time(m, "completed_at"));
         }
     }

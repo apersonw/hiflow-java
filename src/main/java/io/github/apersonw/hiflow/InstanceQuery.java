@@ -43,6 +43,9 @@ public final class InstanceQuery {
 
         public Builder keyword(String v) { return set("keyword", v); }
 
+        /** 查询已归档的实例（服务端开启归档后，结束较久的实例只在归档中） */
+        public Builder archived(boolean v) { return set("archived", v ? "true" : null); }
+
         public Builder page(int v) { return set("page", v > 0 ? Integer.toString(v) : null); }
 
         public Builder pageSize(int v) { return set("page_size", v > 0 ? Integer.toString(v) : null); }

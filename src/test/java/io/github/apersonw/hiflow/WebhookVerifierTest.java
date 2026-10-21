@@ -26,6 +26,36 @@ class WebhookVerifierTest {
     }
 
     @Test
+    void resolveCallback() {
+        var body = """
+                {"id":"c1","type":"resolve.users","created_at":"2026-10-20T07:00:00Z",
+                 "data":{"rule":"leader","args":["u1"],"node_id":"mgr","instance":{"id":7,"starter":"u1"},"variables":{"amount":3}}}""";
+        long now = Instant.now().getEpochSecond();
+        var req = ResolveRequest.from(WebhookVerifier.verify("sec", sign("sec", now, body), body.getBytes(StandardCharsets.UTF_8)));
+        assertEquals("leader", req.rule());
+        assertEquals(java.util.List.of("u1"), req.args());
+        assertEquals("u1", req.instance().starter());
+        assertEquals(3L, ((Number) req.variables().get("amount")).longValue());
+        assertEquals("{\"users\":[\"m1\"]}", ResolveRequest.response(java.util.List.of("m1")));
+    }
+
+    @Test
+    void serviceCallback() {
+        var body = """
+                {"id":"c2","type":"service.invoke","created_at":"2026-10-20T07:00:00Z",
+                 "data":{"service":"account.open","params":{"user":"u1"},"node_id":"svc","task_id":12,"attempt":2,"instance":{"id":7},"variables":{}}}""";
+        long now = Instant.now().getEpochSecond();
+        var req = ServiceRequest.from(WebhookVerifier.verify("sec", sign("sec", now, body), body.getBytes(StandardCharsets.UTF_8)));
+        assertEquals("account.open", req.service());
+        assertEquals("u1", req.params().get("user"));
+        assertEquals(12, req.taskId());
+        assertEquals(2, req.attempt());
+        assertEquals(7, req.instance().id());
+        assertEquals("{\"variables\":{\"ok\":true}}", ServiceRequest.response(java.util.Map.of("ok", true)));
+        assertThrows(IllegalArgumentException.class, () -> ResolveRequest.from(WebhookVerifier.verify("sec", sign("sec", now, body), body.getBytes(StandardCharsets.UTF_8))));
+    }
+
+    @Test
     void verifyAndParse() {
         var body = """
                 {"id":"e1","type":"task.created","created_at":"2026-10-20T07:00:00Z",

@@ -2,12 +2,14 @@ package io.github.apersonw.hiflow;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -78,12 +80,33 @@ class IntegrationTest {
         third = c.returnTask(dirTask.id(), "d1", "manager", "金额有误");
         assertEquals("manager", third.activeTasks().get(0).nodeId());
 
+        // 抄送：处理时抄送给 fin，fin 查看并标记已读
+        third = c.complete(third.activeTasks().get(0).id(), "m1", "已核对", null, List.of("fin"));
+        assertEquals("fin", third.cc().get(0).user());
+        var ccs = c.ccs("fin", true, 0, 0);
+        assertEquals(1, ccs.total());
+        assertEquals("m1", ccs.list().get(0).sender());
+        assertTrue(c.readCC(ccs.list().get(0).id(), "fin").read());
+        assertEquals(0, c.ccs("fin", true, 0, 0).total());
+
+        // 委托代理：m1 休假，报销待办交给 agent，m1 本人仍可处理
+        var delegation = c.createDelegation("m1", "agent", "expense", null, null, "休假");
+        var fourth = c.start(StartRequest.builder("expense").starter("u1").variable("manager", "m1").variable("amount", 5000).build());
+        var delegated = fourth.activeTasks().get(0);
+        assertEquals("agent", delegated.assignee());
+        assertEquals("m1", delegated.delegatedFrom());
+        assertEquals(1, c.delegations("m1", null, true, 0, 0).total());
+        c.deleteDelegation(delegation.id());
+        var gone = assertThrows(HiFlowException.class, () -> c.deleteDelegation(delegation.id()));
+        assertEquals(ErrorCodes.NOT_FOUND, gone.getCode());
+        c.complete(delegated.id(), "m1", null, null);
+
         var second = c.start(StartRequest.builder("expense").starter("u1").variable("manager", "m1").variable("amount", 10).build());
         var recallErr = assertThrows(HiFlowException.class, () -> c.recall(second.id(), "u2"));
         assertEquals(ErrorCodes.NOT_ASSIGNEE, recallErr.getCode());
         var recalled = c.recall(second.id(), "u1");
         assertEquals(Instance.CANCELED, recalled.status());
         assertEquals("发起人撤回", recalled.endReason());
-        assertEquals(3, c.instances(InstanceQuery.builder().key("expense").build()).total());
+        assertEquals(4, c.instances(InstanceQuery.builder().key("expense").build()).total());
     }
 }

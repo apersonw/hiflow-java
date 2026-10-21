@@ -14,6 +14,10 @@ final class Models {
         return s.isEmpty() ? null : OffsetDateTime.parse(s);
     }
 
+    static Long optLong(Map<String, Object> m, String key) {
+        return m.get(key) instanceof Number n ? n.longValue() : null;
+    }
+
     static List<String> strings(Map<String, Object> m, String key) {
         var out = new ArrayList<String>();
         for (var v : Json.list(m, key)) {

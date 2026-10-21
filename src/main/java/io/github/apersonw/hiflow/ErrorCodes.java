@@ -7,6 +7,8 @@ public final class ErrorCodes {
     public static final int BAD_REQUEST = 40001;
     /** 不能退回到该节点 */
     public static final int RETURN_TARGET = 40003;
+    /** 转办、加签、委托的目标用户在组织架构中不存在或已停用（目录校验为 strict） */
+    public static final int INVALID_USER = 40004;
     public static final int MISSING_AUTH = 40101;
     public static final int INVALID_CLIENT = 40102;
     public static final int TIMESTAMP_EXPIRED = 40103;
@@ -31,4 +33,6 @@ public final class ErrorCodes {
     public static final int TOO_MANY_REQUESTS = 42901;
     public static final int INTERNAL = 50000;
     public static final int DEPENDENCY = 50003;
+    /** HiFlow 回调业务系统失败（如处理人规则解析） */
+    public static final int CALLBACK = 50201;
 }

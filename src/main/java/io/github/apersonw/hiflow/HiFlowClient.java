@@ -11,6 +11,7 @@ import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -35,7 +36,7 @@ import java.util.function.LongSupplier;
  * 服务端错误抛出 {@link HiFlowException}，网络错误抛出 {@link UncheckedIOException}。
  */
 public final class HiFlowClient {
-    public static final String VERSION = "0.1.1";
+    public static final String VERSION = "0.1.2";
 
     private final String baseUrl;
     private final String clientId;
@@ -108,6 +109,22 @@ public final class HiFlowClient {
                 Map.of("operator", Objects.requireNonNull(operator, "operator")))));
     }
 
+    /**
+     * 向实例发送消息：完成等待该消息（节点 message）的接收任务，variables 合并到流程变量后继续推进；
+     * 没有等待该消息的接收任务时抛出 {@link ErrorCodes#CONFLICT}。
+     *
+     * @param operator 记为接收任务的处理人，null 时为 system
+     */
+    public Instance signal(long instanceId, String message, Map<String, ?> variables, String operator) {
+        var body = new LinkedHashMap<String, Object>();
+        body.put("message", Objects.requireNonNull(message, "message"));
+        putIfPresent(body, "operator", operator);
+        if (variables != null && !variables.isEmpty()) {
+            body.put("variables", variables);
+        }
+        return Instance.from(object(call("POST", "/open/v1/instances/" + instanceId + "/signal", Map.of(), body)));
+    }
+
     // ---------- 任务 ----------
 
     /** 查询一页任务 */
@@ -134,11 +151,22 @@ public final class HiFlowClient {
      *                  会签任务的 approved 记为本人表态，节点结束时流程变量 approved 为会签结论
      */
     public Instance complete(long taskId, String operator, String comment, Map<String, ?> variables) {
+        return complete(taskId, operator, comment, variables, null);
+    }
+
+    /**
+     * 完成任务并抄送：cc 中的用户收到抄送记录（另有节点配置的抄送在节点处理完成时产生）；其余同
+     * {@link #complete(long, String, String, Map)}。
+     */
+    public Instance complete(long taskId, String operator, String comment, Map<String, ?> variables, List<String> cc) {
         var body = new LinkedHashMap<String, Object>();
         body.put("operator", Objects.requireNonNull(operator, "operator"));
         putIfPresent(body, "comment", comment);
         if (variables != null && !variables.isEmpty()) {
             body.put("variables", variables);
+        }
+        if (cc != null && !cc.isEmpty()) {
+            body.put("cc", cc);
         }
         return Instance.from(object(call("POST", "/open/v1/tasks/" + taskId + "/complete", Map.of(), body)));
     }
@@ -176,6 +204,127 @@ public final class HiFlowClient {
         body.put("to", Objects.requireNonNull(to, "to"));
         putIfPresent(body, "comment", comment);
         return Task.from(object(call("POST", "/open/v1/tasks/" + taskId + "/transfer", Map.of(), body)));
+    }
+
+    /**
+     * 加签：会签（多实例）处理中临时加人，新待办加入同一批次（依次处理时排在最后），完成条件按新的总人数计算。
+     * 非多实例任务、或加签的人都已在会签中时抛出 {@link ErrorCodes#BAD_REQUEST}。
+     */
+    public Instance addSigners(long taskId, String operator, List<String> users, String comment) {
+        return Instance.from(object(call("POST", "/open/v1/tasks/" + taskId + "/add-signers", Map.of(), signers(operator, users, comment))));
+    }
+
+    /** 减签：取消会签中尚未处理的人（不能减掉自己），剩余的人已满足完成条件时节点随即结束并推进 */
+    public Instance removeSigners(long taskId, String operator, List<String> users, String comment) {
+        return Instance.from(object(call("POST", "/open/v1/tasks/" + taskId + "/remove-signers", Map.of(), signers(operator, users, comment))));
+    }
+
+    private static Map<String, Object> signers(String operator, List<String> users, String comment) {
+        var body = new LinkedHashMap<String, Object>();
+        body.put("operator", Objects.requireNonNull(operator, "operator"));
+        body.put("users", List.copyOf(Objects.requireNonNull(users, "users")));
+        putIfPresent(body, "comment", comment);
+        return body;
+    }
+
+    // ---------- 委托代理 ----------
+
+    /**
+     * 设置委托代理：生效期内 user 的新待办（指定处理人与会签处理人）改由 delegate 处理，委托人本人仍可处理；
+     * 已生成的待办不变，候选人不受影响。
+     *
+     * @param definitionKey 只委托该流程的待办，null 表示全部流程
+     * @param startsAt      开始时间，null 表示现在
+     * @param endsAt        结束时间（不含），null 表示长期有效
+     */
+    public Delegation createDelegation(String user, String delegate, String definitionKey, OffsetDateTime startsAt,
+                                       OffsetDateTime endsAt, String reason) {
+        var body = new LinkedHashMap<String, Object>();
+        body.put("user", Objects.requireNonNull(user, "user"));
+        body.put("delegate", Objects.requireNonNull(delegate, "delegate"));
+        putIfPresent(body, "definition_key", definitionKey);
+        if (startsAt != null) {
+            body.put("starts_at", startsAt.toString());
+        }
+        if (endsAt != null) {
+            body.put("ends_at", endsAt.toString());
+        }
+        putIfPresent(body, "reason", reason);
+        return Delegation.from(object(call("POST", "/open/v1/delegations", Map.of(), body)));
+    }
+
+    /**
+     * 查询一页委托代理规则（最新的在前）。
+     *
+     * @param user       委托人，可为 null
+     * @param delegate   代理人，可为 null
+     * @param activeOnly 只看当前生效的
+     */
+    public Page<Delegation> delegations(String user, String delegate, boolean activeOnly, int page, int pageSize) {
+        var q = new LinkedHashMap<String, List<String>>();
+        if (user != null && !user.isEmpty()) {
+            q.put("user", List.of(user));
+        }
+        if (delegate != null && !delegate.isEmpty()) {
+            q.put("delegate", List.of(delegate));
+        }
+        if (activeOnly) {
+            q.put("active", List.of("true"));
+        }
+        if (page > 0) {
+            q.put("page", List.of(Integer.toString(page)));
+        }
+        if (pageSize > 0) {
+            q.put("page_size", List.of(Integer.toString(pageSize)));
+        }
+        return Page.from(object(call("GET", "/open/v1/delegations", q, null)), Delegation::from);
+    }
+
+    /** 删除委托代理规则（立即失效，已交给代理人的待办不变） */
+    public void deleteDelegation(long id) {
+        call("DELETE", "/open/v1/delegations/" + id, Map.of(), null);
+    }
+
+    // ---------- 抄送 ----------
+
+    /**
+     * 查询一页抄送记录（最新的在前）。
+     *
+     * @param user       被抄送人（“抄送我的”），可为 null
+     * @param unreadOnly 只看未读
+     * @param page       页码，从 1 开始；0 为默认
+     * @param pageSize   每页条数；0 为默认
+     */
+    public Page<CC> ccs(String user, boolean unreadOnly, int page, int pageSize) {
+        var q = new LinkedHashMap<String, List<String>>();
+        if (user != null && !user.isEmpty()) {
+            q.put("user", List.of(user));
+        }
+        if (unreadOnly) {
+            q.put("unread", List.of("true"));
+        }
+        if (page > 0) {
+            q.put("page", List.of(Integer.toString(page)));
+        }
+        if (pageSize > 0) {
+            q.put("page_size", List.of(Integer.toString(pageSize)));
+        }
+        return Page.from(object(call("GET", "/open/v1/cc", q, null)), CC::from);
+    }
+
+    /** 标记抄送已读；user 须为被抄送人 */
+    public CC readCC(long id, String user) {
+        return CC.from(object(call("POST", "/open/v1/cc/" + id + "/read", Map.of(), Map.of("user", Objects.requireNonNull(user, "user")))));
+    }
+
+    // ---------- 待办嵌入 ----------
+
+    /**
+     * 用客户端密钥在本地签发待办嵌入令牌（不请求 HiFlow），把 {@link EmbedToken#token()} 返回给业务前端，
+     * 业务前端凭它以该用户的身份调用 /embed/v1（浏览器 SDK / 嵌入组件）。
+     */
+    public EmbedToken createEmbedToken(EmbedToken.Options options) {
+        return EmbedToken.sign(clientId, clientSecret, Objects.requireNonNull(options, "options"), now());
     }
 
     // ---------- 传输 ----------
