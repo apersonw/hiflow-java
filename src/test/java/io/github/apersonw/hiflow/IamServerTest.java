@@ -165,4 +165,31 @@ class IamServerTest {
             http.stop(0);
         }
     }
+
+    @Test
+    void syncExport() {
+        IamServer s = new IamServer(new StaticIamDirectory(DATA), new IamServer.Options(ID, SECRET));
+        List<Object> ids = new ArrayList<>();
+        String token = "", asOf = null;
+        do {
+            Map<String, List<String>> q = new LinkedHashMap<>(Map.of("page_size", List.of("2")));
+            if (!token.isEmpty()) {
+                q.put("page_token", List.of(token));
+            }
+            Map<String, Object> page = Json.parseObject(get(s, "/sync/users", q).body());
+            if (asOf == null) {
+                asOf = Json.str(page, "as_of");
+            } else {
+                assertEquals(asOf, Json.str(page, "as_of"), "as_of must stay the same across pages");
+            }
+            Json.list(page, "items").forEach(it -> ids.add(Json.asObject(it).get("id")));
+            token = Json.str(page, "next_page_token");
+        } while (!token.isEmpty() && ids.size() < 20);
+        assertEquals(List.of("ceo", "mgr", "u1", "u2", "u3"), ids);
+        String later = Instant.now().plusSeconds(1).toString();
+        assertEquals(0, Json.list(Json.parseObject(get(s, "/sync/users", Map.of("updated_since", List.of(later))).body()), "items").size());
+        assertEquals(400, get(s, "/sync/users", Map.of("updated_since", List.of("yesterday"))).status());
+        Map<String, Object> role = Json.asObject(Json.list(Json.parseObject(get(s, "/sync/roles", Map.of()).body()), "items").get(0));
+        assertEquals(3, Json.list(role, "member_ids").size());
+    }
 }

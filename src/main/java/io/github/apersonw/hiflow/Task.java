@@ -20,12 +20,14 @@ import java.util.Map;
  * @param nextRunAt     服务任务下次调用时间，进行中且为 null 表示重试已用尽
  * @param lastError     服务任务最近一次调用失败的原因
  * @param childInstanceId 子流程任务发起的子实例，否则为 null
+ * @param resumeNode    退回时选择了“处理后直接回到退回人”：本待办处理后回到的节点，否则为空串
  * @param instanceTitle 以下实例摘要字段在任务列表与任务详情中返回，实例详情中的任务为空串
+ * @param form          本节点的表单视图（只在任务详情 {@link HiFlowClient#task} 中返回；模型没有定义表单时为 null）
  */
 public record Task(long id, long instanceId, String nodeId, String name, String kind, String assignee, List<String> candidates,
                    String status, String operator, String comment, String scope, String multiKey, Boolean approved, String delegatedFrom,
-                   OffsetDateTime dueAt, boolean overdue, int attempts, OffsetDateTime nextRunAt, String lastError, Long childInstanceId, OffsetDateTime createdAt, OffsetDateTime completedAt,
-                   String instanceTitle, String definitionKey, String definitionName, String businessKey, String starter) {
+                   OffsetDateTime dueAt, boolean overdue, int attempts, OffsetDateTime nextRunAt, String lastError, Long childInstanceId, String resumeNode, OffsetDateTime createdAt, OffsetDateTime completedAt,
+                   String instanceTitle, String definitionKey, String definitionName, String businessKey, String starter, FormView form) {
     public static final String ACTIVE = "active";
     public static final String COMPLETED = "completed";
     public static final String CANCELED = "canceled";
@@ -48,9 +50,9 @@ public record Task(long id, long instanceId, String nodeId, String name, String 
                 Json.str(m, "comment"), Json.str(m, "scope"), Json.str(m, "multi_key"),
                 m.get("approved") instanceof Boolean b ? b : null, Json.str(m, "delegated_from"), Models.time(m, "due_at"), Json.bool(m, "overdue"),
                 (int) Json.num(m, "attempts"), Models.time(m, "next_run_at"), Json.str(m, "last_error"),
-                Models.optLong(m, "child_instance_id"),
+                Models.optLong(m, "child_instance_id"), Json.str(m, "resume_node"),
                 Models.time(m, "created_at"), Models.time(m, "completed_at"),
                 Json.str(m, "instance_title"), Json.str(m, "definition_key"), Json.str(m, "definition_name"),
-                Json.str(m, "business_key"), Json.str(m, "starter"));
+                Json.str(m, "business_key"), Json.str(m, "starter"), FormView.from(Json.obj(m, "form")));
     }
 }

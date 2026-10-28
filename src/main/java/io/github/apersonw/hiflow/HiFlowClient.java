@@ -36,7 +36,7 @@ import java.util.function.LongSupplier;
  * 服务端错误抛出 {@link HiFlowException}，网络错误抛出 {@link UncheckedIOException}。
  */
 public final class HiFlowClient {
-    public static final String VERSION = "0.1.2";
+    public static final String VERSION = "0.1.3";
 
     private final String baseUrl;
     private final String clientId;
@@ -73,12 +73,20 @@ public final class HiFlowClient {
         return Definition.from(object(call("GET", "/open/v1/definitions/" + Objects.requireNonNull(key, "key"), Map.of(), null)));
     }
 
+    /** 流程最新版本的发起表单（字段、权限与默认值），业务前端据此渲染发起页 */
+    public StartForm startForm(String key) {
+        return StartForm.from(object(call("GET", "/open/v1/definitions/" + Objects.requireNonNull(key, "key") + "/start-form", Map.of(), null)));
+    }
+
     // ---------- 流程实例 ----------
 
-    /** 发起流程实例，返回实例详情（含发起后生成的待办） */
+    /**
+     * 发起流程实例，返回实例详情（含发起后生成的待办）。设置了幂等键时失败可安全重试（SDK 自动重试），重复请求返回已发起的实例；
+     * 同一个键已用于其他流程时抛出 {@link ErrorCodes#CONFLICT}。
+     */
     public Instance start(StartRequest request) {
         Objects.requireNonNull(request, "request");
-        return Instance.from(object(call("POST", "/open/v1/instances", Map.of(), request.toBody())));
+        return Instance.from(object(call("POST", "/open/v1/instances", Map.of(), request.toBody(), request.idempotent())));
     }
 
     /** 实例详情（含全部任务与流程轨迹） */
@@ -101,12 +109,34 @@ public final class HiFlowClient {
     }
 
     /**
-     * 发起人撤回：还没有任何任务被处理时可撤回，operator 须为实例的发起人
-     * （否则 {@link ErrorCodes#NOT_ASSIGNEE}；已有任务处理过为 {@link ErrorCodes#RECALL_NOT_ALLOWED}）。
+     * 发起人撤回：还没有其他人处理过任务（发起人自己完成的不算）或已被退回到发起人时可撤回，operator 须为实例的发起人
+     * （否则 {@link ErrorCodes#NOT_ASSIGNEE}；不满足撤回条件为 {@link ErrorCodes#RECALL_NOT_ALLOWED}）。
      */
     public Instance recall(long id, String operator) {
         return Instance.from(object(call("POST", "/open/v1/instances/" + id + "/recall", Map.of(),
                 Map.of("operator", Objects.requireNonNull(operator, "operator")))));
+    }
+
+    /**
+     * 发起人撤回到自己重新提交：撤回条件同 {@link #recall}，实例不结束——进行中的待办取消、并行分支作废，
+     * 发起人得到“重新提交”待办（在开始节点上），修改表单后完成它即从头重新推进。
+     */
+    public Instance recallToStarter(long id, String operator) {
+        return Instance.from(object(call("POST", "/open/v1/instances/" + id + "/recall", Map.of(),
+                Map.of("operator", Objects.requireNonNull(operator, "operator"), "mode", "resubmit"))));
+    }
+
+    /**
+     * 发起人催办实例中进行中的人工待办：每个待办推送 Webhook {@code task.urged}，由业务系统通知处理人。
+     * 距上次催办不足服务端最小间隔的待办跳过；全部跳过时抛出 {@link ErrorCodes#TOO_MANY_REQUESTS}，没有可催办的待办时抛出 {@link ErrorCodes#NOTHING_TO_URGE}。
+     *
+     * @return 本次催办的待办 ID（urged）与跳过的待办 ID（skipped）
+     */
+    public UrgeResult urge(long id, String operator, String comment) {
+        var body = new LinkedHashMap<String, Object>();
+        body.put("operator", Objects.requireNonNull(operator, "operator"));
+        putIfPresent(body, "comment", comment);
+        return UrgeResult.from(object(call("POST", "/open/v1/instances/" + id + "/urge", Map.of(), body)));
     }
 
     /**
@@ -123,6 +153,15 @@ public final class HiFlowClient {
             body.put("variables", variables);
         }
         return Instance.from(object(call("POST", "/open/v1/instances/" + instanceId + "/signal", Map.of(), body)));
+    }
+
+    /**
+     * 发送消息（快递状态推送等）：按实例 ID 或业务主键找到等待该消息的实例并投递。带 messageId 时去重（重复返回 duplicate，失败自动重试），
+     * 带 ttl 时暂时无人等待的消息会缓存（buffered），实例走到等待该消息的节点后自动投递。同一业务主键有多个实例在等待时抛出 {@link ErrorCodes#CONFLICT}。
+     */
+    public MessageResult sendMessage(MessageRequest request) {
+        Objects.requireNonNull(request, "request");
+        return MessageResult.from(object(call("POST", "/open/v1/messages", Map.of(), request.toBody(), request.idempotent())));
     }
 
     // ---------- 任务 ----------
@@ -176,7 +215,7 @@ public final class HiFlowClient {
         return Task.from(object(call("POST", "/open/v1/tasks/" + taskId + "/claim", Map.of(), Map.of("user", user))));
     }
 
-    /** 可退回的节点：本实例中处理过、且在当前分支或其外层的人工任务（最近处理的在前） */
+    /** 可退回的节点：本实例中处理过、且在当前分支或其外层的人工任务（最近处理的在前），最后是开始节点（退回发起人） */
     public List<ReturnTarget> returnTargets(long taskId) {
         var out = new java.util.ArrayList<ReturnTarget>();
         for (var v : (List<?>) call("GET", "/open/v1/tasks/" + taskId + "/return-targets", Map.of(), null)) {
@@ -187,13 +226,24 @@ public final class HiFlowClient {
 
     /**
      * 退回到本实例中处理过的人工任务节点：本待办结束，目标节点重新生成待办；目标在当前并行分支之外时整次并行分支作废。
-     * 目标不合法时抛出 {@link ErrorCodes#RETURN_TARGET}。
+     * 目标为开始节点时退回发起人，生成发起人的“重新提交”待办。目标不合法时抛出 {@link ErrorCodes#RETURN_TARGET}。
      */
     public Instance returnTask(long taskId, String operator, String targetNode, String comment) {
+        return returnTask(taskId, operator, targetNode, comment, false);
+    }
+
+    /**
+     * 退回，{@code directBack} 为 true 时目标节点的待办处理后直接回到退回人所在的节点，不再按模型重走中间的节点
+     * （只支持 {@link ReturnTarget#directBack()} 为 true 的目标）。
+     */
+    public Instance returnTask(long taskId, String operator, String targetNode, String comment, boolean directBack) {
         var body = new LinkedHashMap<String, Object>();
         body.put("operator", Objects.requireNonNull(operator, "operator"));
         body.put("target_node", Objects.requireNonNull(targetNode, "targetNode"));
         putIfPresent(body, "comment", comment);
+        if (directBack) {
+            body.put("direct_back", true);
+        }
         return Instance.from(object(call("POST", "/open/v1/tasks/" + taskId + "/return", Map.of(), body)));
     }
 
@@ -204,6 +254,16 @@ public final class HiFlowClient {
         body.put("to", Objects.requireNonNull(to, "to"));
         putIfPresent(body, "comment", comment);
         return Task.from(object(call("POST", "/open/v1/tasks/" + taskId + "/transfer", Map.of(), body)));
+    }
+
+    /** 转办，返回实例详情（与完成、退回等一致）；{@link #transfer} 返回任务本身 */
+    public Instance transferInstance(long taskId, String operator, String to, String comment) {
+        var body = new LinkedHashMap<String, Object>();
+        body.put("operator", Objects.requireNonNull(operator, "operator"));
+        body.put("to", Objects.requireNonNull(to, "to"));
+        putIfPresent(body, "comment", comment);
+        body.put("return_instance", true);
+        return Instance.from(object(call("POST", "/open/v1/tasks/" + taskId + "/transfer", Map.of(), body)));
     }
 
     /**
@@ -380,8 +440,13 @@ public final class HiFlowClient {
      * 时间戳超窗时按服务端时间校准时钟后立即重试一次（超窗请求在验签前即被拒绝，写操作不会重复执行）。
      */
     Object call(String method, String path, Map<String, List<String>> query, Object body) {
+        return call(method, path, query, body, false);
+    }
+
+    /** idempotent：写操作可安全重试（如带幂等键的发起），与 GET 一样按配置重试 */
+    Object call(String method, String path, Map<String, List<String>> query, Object body, boolean idempotent) {
         byte[] payload = body == null ? null : Json.write(body).getBytes(StandardCharsets.UTF_8);
-        int attempts = 1 + ("GET".equals(method) ? retries : 0);
+        int attempts = 1 + ("GET".equals(method) || idempotent ? retries : 0);
         boolean clockFixed = false;
         long waitMs = 0;
         IOException last = null;

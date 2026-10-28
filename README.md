@@ -6,7 +6,7 @@ HiFlow 流程引擎 Open API 的 Java 客户端：请求签名、发起流程、
 <dependency>
   <groupId>io.github.apersonw</groupId>
   <artifactId>hiflow-sdk</artifactId>
-  <version>0.1.2</version>
+  <version>0.1.3</version>
 </dependency>
 ```
 
@@ -32,6 +32,7 @@ client.complete(todo.list().get(0).id(), "u7", "同意", Map.of("approved", true
 | 方法 | 说明 |
 |---|---|
 | `definition(key)` | 流程定义的最新版本（含流程图） |
+| `startForm(key)` | 发起表单：开始节点上的字段、权限与默认值（模型没有定义表单时 `form()` 为 null）；任务详情 `task(id)` 的 `form()` 为本节点的表单与当前值，提交不合法时为 `ErrorCodes.INVALID_FORM` |
 | `start(request)` | 发起流程，返回实例详情（含生成的待办） |
 | `instance(id)` / `instances(query)` | 实例详情（含任务与轨迹）/ 分页查询 |
 | `cancel(id, operator, reason)` | 撤回 / 终止实例 |

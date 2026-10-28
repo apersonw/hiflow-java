@@ -9,6 +9,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -38,7 +40,7 @@ import java.util.function.Supplier;
  * Request.path 须为相对基础地址的路径（未经 URL 编码，如 /users/u1），与签名中的 Path 一致。
  */
 public final class IamServer {
-    public static final String SPEC_VERSION = "1.0";
+    public static final String SPEC_VERSION = "1.1";
     public static final int DEFAULT_PAGE_SIZE = 100;
     public static final int MAX_PAGE_SIZE = 500;
     public static final int MAX_MANAGER_LEVELS = 10;
@@ -131,6 +133,7 @@ public final class IamServer {
     private final boolean managers;
     private final boolean departments;
     private final boolean roles;
+    private final boolean sync;
     private final String capabilities;
 
     public IamServer(IamDirectory dir, Options opt) {
@@ -140,6 +143,7 @@ public final class IamServer {
         managers = dir instanceof IamDirectory.Managers;
         departments = dir instanceof IamDirectory.Departments;
         roles = dir instanceof IamDirectory.Roles;
+        sync = dir instanceof IamDirectory.Syncer;
         Map<String, Object> f = new LinkedHashMap<>();
         f.put("search", search);
         f.put("managers", managers);
@@ -147,6 +151,7 @@ public final class IamServer {
         f.put("recursive_members", departments && opt.recursiveMembers);
         f.put("roles", roles);
         f.put("role_department_scope", roles && opt.roleDepartmentScope);
+        f.put("sync", sync);
         Map<String, Object> caps = new LinkedHashMap<>();
         caps.put("spec_version", SPEC_VERSION);
         if (opt.provider != null) {
@@ -253,6 +258,34 @@ public final class IamServer {
             require(roles && (dept.isEmpty() || opt.roleDepartmentScope));
             return page(((IamDirectory.Roles) dir).roleMembers(s[1], dept, pageOf(q)), IamDirectory.User::toJson);
         }
+        if (get && n == 2 && s[0].equals("sync")) {
+            String kind = s[1];
+            require(sync && (!kind.equals("departments") || departments) && (!kind.equals("roles") || roles));
+            Instant since = null;
+            String v = param(q, "updated_since");
+            if (!v.isEmpty()) {
+                try {
+                    since = OffsetDateTime.parse(v).toInstant();
+                } catch (DateTimeParseException e) {
+                    throw IamException.badRequest("updated_since 需为 RFC 3339 时间");
+                }
+            }
+            IamDirectory.Syncer sy = (IamDirectory.Syncer) dir;
+            IamDirectory.PageRequest p = pageOf(q);
+            switch (kind) {
+                case "users" -> {
+                    return syncPage(sy.syncUsers(since, p), IamDirectory.SyncUser::toJson);
+                }
+                case "departments" -> {
+                    return syncPage(sy.syncDepartments(since, p), IamDirectory.SyncDepartment::toJson);
+                }
+                case "roles" -> {
+                    return syncPage(sy.syncRoles(since, p), IamDirectory.SyncRole::toJson);
+                }
+                default -> {
+                }
+            }
+        }
         throw IamException.notFound("接口不存在：" + req.method() + " " + req.path());
     }
 
@@ -306,6 +339,21 @@ public final class IamServer {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("items", items);
         m.put("next_page_token", next);
+        return Json.write(m);
+    }
+
+    private static <T> String syncPage(IamDirectory.SyncPage<T> p, Function<T, Map<String, Object>> conv) {
+        if (p == null || p.asOf() == null) {
+            throw new IamException(500, IamException.INTERNAL, "导出结果缺少 asOf");
+        }
+        List<Object> items = new ArrayList<>();
+        if (p.items() != null) {
+            p.items().forEach(it -> items.add(conv.apply(it)));
+        }
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("items", items);
+        m.put("next_page_token", p.nextPageToken() == null ? "" : p.nextPageToken());
+        m.put("as_of", p.asOf().toString());
         return Json.write(m);
     }
 

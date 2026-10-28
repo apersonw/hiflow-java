@@ -1,5 +1,6 @@
 package io.github.apersonw.hiflow;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -9,12 +10,15 @@ import java.util.Set;
 import java.util.TreeMap;
 
 /** 内存目录（全部能力），数据格式与 HiFlow tools/iammock 的 JSON 文件相同：测试与契约自检用，也是各方法语义的参考 */
-final class StaticIamDirectory implements IamDirectory, IamDirectory.Managers, IamDirectory.Departments, IamDirectory.Roles, IamDirectory.Searcher {
+final class StaticIamDirectory implements IamDirectory, IamDirectory.Managers, IamDirectory.Departments, IamDirectory.Roles, IamDirectory.Searcher,
+        IamDirectory.Syncer {
     private final Map<String, User> users = new TreeMap<>();
     private final Map<String, String> managerOf = new HashMap<>();
     private final Map<String, Department> depts = new TreeMap<>();
     private final Map<String, Role> roles = new TreeMap<>();
     private final Map<String, List<String>> roleMembers = new HashMap<>();
+    /** 数据载入时间，作为全部记录的 updated_at（内存数据不变化） */
+    private final Instant loadedAt = Instant.now();
 
     StaticIamDirectory(String json) {
         Map<String, Object> data = Json.parseObject(json);
@@ -180,5 +184,36 @@ final class StaticIamDirectory implements IamDirectory, IamDirectory.Managers, I
         List<User> list = active(scope, null).stream()
                 .filter(u -> k.isEmpty() || u.name().toLowerCase().contains(k) || u.id().toLowerCase().contains(k)).toList();
         return Page.of(list, page);
+    }
+
+    private boolean changed(Instant since) {
+        return since == null || !loadedAt.isBefore(since);
+    }
+
+    @Override
+    public SyncPage<SyncUser> syncUsers(Instant since, PageRequest page) {
+        List<SyncUser> list = new ArrayList<>();
+        if (changed(since)) {
+            users.values().forEach(u -> list.add(new SyncUser(u, managerOf.get(u.id()), loadedAt, false)));
+        }
+        return SyncPage.of(list, page, Instant.now());
+    }
+
+    @Override
+    public SyncPage<SyncDepartment> syncDepartments(Instant since, PageRequest page) {
+        List<SyncDepartment> list = new ArrayList<>();
+        if (changed(since)) {
+            depts.values().forEach(d -> list.add(new SyncDepartment(withPath(d), loadedAt, false)));
+        }
+        return SyncPage.of(list, page, Instant.now());
+    }
+
+    @Override
+    public SyncPage<SyncRole> syncRoles(Instant since, PageRequest page) {
+        List<SyncRole> list = new ArrayList<>();
+        if (changed(since)) {
+            roles.values().forEach(r -> list.add(new SyncRole(r, roleMembers.get(r.code()), loadedAt, false)));
+        }
+        return SyncPage.of(list, page, Instant.now());
     }
 }

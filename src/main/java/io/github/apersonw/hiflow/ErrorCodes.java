@@ -9,6 +9,8 @@ public final class ErrorCodes {
     public static final int RETURN_TARGET = 40003;
     /** 转办、加签、委托的目标用户在组织架构中不存在或已停用（目录校验为 strict） */
     public static final int INVALID_USER = 40004;
+    /** 提交的表单字段类型不对、必填未填或在本节点不可修改 */
+    public static final int INVALID_FORM = 40005;
     public static final int MISSING_AUTH = 40101;
     public static final int INVALID_CLIENT = 40102;
     public static final int TIMESTAMP_EXPIRED = 40103;
@@ -27,6 +29,8 @@ public final class ErrorCodes {
     public static final int DEFINITION_SUSPENDED = 40904;
     /** 已有任务被处理，不能撤回 */
     public static final int RECALL_NOT_ALLOWED = 40905;
+    /** 实例中没有进行中的人工待办可催办 */
+    public static final int NOTHING_TO_URGE = 40906;
     public static final int PAYLOAD_TOO_LARGE = 41301;
     /** 流程推进失败（排他网关没有满足条件的出口等），通常是流程变量缺失 */
     public static final int EVALUATE = 42201;

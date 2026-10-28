@@ -34,6 +34,8 @@ public record WebhookEvent(String id, String type, OffsetDateTime createdAt, Eve
     public static final String CC_CREATED = "cc.created";
     /** 待办的处理人在组织架构中已停用或不存在（每个待办一次，之后按目录配置交接） */
     public static final String TASK_ASSIGNEE_INACTIVE = "task.assignee_inactive";
+    /** 发起人催办（每个被催办的待办一条，comment 为催办说明），由业务系统通知处理人 */
+    public static final String TASK_URGED = "task.urged";
     /** 处理人规则解析回调（发往客户端的回调地址，需同步响应），见 {@link ResolveRequest} */
     public static final String RESOLVE_USERS = "resolve.users";
     /** 服务任务调用回调（发往客户端的回调地址，需同步响应），见 {@link ServiceRequest} */
@@ -54,11 +56,12 @@ public record WebhookEvent(String id, String type, OffsetDateTime createdAt, Eve
     /** 事件中的实例摘要 */
     public record EventInstance(long id, String definitionKey, int definitionVersion, String definitionName, String businessKey,
                                 String title, String starter, String status, OffsetDateTime startedAt, OffsetDateTime endedAt,
-                                String endReason) {
+                                String endReason, String result) {
         static EventInstance from(Map<String, Object> m) {
             return new EventInstance(Json.num(m, "id"), Json.str(m, "definition_key"), (int) Json.num(m, "definition_version"),
                     Json.str(m, "definition_name"), Json.str(m, "business_key"), Json.str(m, "title"), Json.str(m, "starter"),
-                    Json.str(m, "status"), Models.time(m, "started_at"), Models.time(m, "ended_at"), Json.str(m, "end_reason"));
+                    Json.str(m, "status"), Models.time(m, "started_at"), Models.time(m, "ended_at"), Json.str(m, "end_reason"),
+                    Json.str(m, "result"));
         }
     }
 

@@ -41,6 +41,9 @@ public final class InstanceQuery {
         /** running | completed | canceled */
         public Builder status(String v) { return set("status", v); }
 
+        /** 审批结果（结束节点声明的 result，如 approved、rejected） */
+        public Builder result(String v) { return set("result", v); }
+
         public Builder keyword(String v) { return set("keyword", v); }
 
         /** 查询已归档的实例（服务端开启归档后，结束较久的实例只在归档中） */

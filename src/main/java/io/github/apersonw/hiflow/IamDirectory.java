@@ -1,6 +1,8 @@
 package io.github.apersonw.hiflow;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
@@ -50,6 +52,20 @@ public interface IamDirectory {
     /** 可选：按姓名或账号搜索在职用户（能力 search），departmentId 非空时限定部门（含下级） */
     interface Searcher {
         Page<User> searchUsers(String keyword, String departmentId, PageRequest page) throws Exception;
+    }
+
+    /**
+     * 可选：导出接口（能力 sync，规范 1.1），HiFlow 据此维护只读的组织快照，在 IAM 长时间不可用时仍能解析处理人规则。
+     * since 为 null 时全量导出（不含墓碑）；否则只返回此后（含该时刻）有变化的记录，已删除的返回墓碑。
+     * 每一页的 asOf 为导出开始时的时间（翻页时保持不变，可用 {@link SyncPage#of} 编码进 token），HiFlow 下次以它为 since。
+     * syncDepartments / syncRoles 只在同时实现了 {@link Departments} / {@link Roles} 时被调用。
+     */
+    interface Syncer {
+        SyncPage<SyncUser> syncUsers(Instant since, PageRequest page) throws Exception;
+
+        SyncPage<SyncDepartment> syncDepartments(Instant since, PageRequest page) throws Exception;
+
+        SyncPage<SyncRole> syncRoles(Instant since, PageRequest page) throws Exception;
     }
 
     String ACTIVE = "active";
@@ -115,6 +131,78 @@ public interface IamDirectory {
             m.put("level", level);
             m.put("user", user.toJson());
             return m;
+        }
+    }
+
+    /** 导出的用户（含停用）与直属上级（managerId 可为 null）；deleted 为墓碑，只需 id 与 updatedAt */
+    record SyncUser(User user, String managerId, Instant updatedAt, boolean deleted) {
+        public static SyncUser tombstone(String id, Instant updatedAt) {
+            return new SyncUser(new User(id, "", DISABLED), null, updatedAt, true);
+        }
+
+        Map<String, Object> toJson() {
+            Map<String, Object> m = deleted ? new LinkedHashMap<>(Map.of("id", user.id())) : user.toJson();
+            m.put("manager_id", managerId == null ? "" : managerId);
+            m.put("updated_at", updatedAt.toString());
+            if (deleted) {
+                m.put("deleted", true);
+            }
+            return m;
+        }
+    }
+
+    /** 导出的部门 */
+    record SyncDepartment(Department department, Instant updatedAt, boolean deleted) {
+        Map<String, Object> toJson() {
+            Map<String, Object> m = department.toJson();
+            m.put("updated_at", updatedAt.toString());
+            if (deleted) {
+                m.put("deleted", true);
+            }
+            return m;
+        }
+    }
+
+    /** 导出的角色与全部成员（含停用）；角色或成员变化都应更新 updatedAt */
+    record SyncRole(Role role, List<String> memberIds, Instant updatedAt, boolean deleted) {
+        Map<String, Object> toJson() {
+            Map<String, Object> m = role.toJson();
+            m.put("member_ids", memberIds == null ? List.of() : memberIds);
+            m.put("updated_at", updatedAt.toString());
+            if (deleted) {
+                m.put("deleted", true);
+            }
+            return m;
+        }
+    }
+
+    /** 导出的一页：asOf 为导出开始时的时间，翻页时每页相同 */
+    record SyncPage<T>(List<T> items, String nextPageToken, Instant asOf) {
+        /** 按偏移量分页一个已排序的完整列表，偏移量与 asOf 编码进 token；首页的 asOf 取 now */
+        public static <T> SyncPage<T> of(List<T> all, PageRequest p, Instant now) {
+            int offset = 0;
+            // token 中以毫秒记录，首页也截到毫秒，保证每页的 as_of 完全相同
+            Instant asOf = now.truncatedTo(ChronoUnit.MILLIS);
+            if (p.token() != null && !p.token().isEmpty()) {
+                try {
+                    String[] parts = new String(Base64.getUrlDecoder().decode(p.token()), StandardCharsets.UTF_8).split(":");
+                    if (parts.length != 3 || !parts[0].equals("s")) {
+                        throw new IllegalArgumentException();
+                    }
+                    offset = Integer.parseInt(parts[1]);
+                    asOf = Instant.ofEpochMilli(Long.parseLong(parts[2]));
+                } catch (IllegalArgumentException e) {
+                    throw IamException.badRequest("page_token 无效");
+                }
+            }
+            if (offset >= all.size()) {
+                return new SyncPage<>(List.of(), "", asOf);
+            }
+            int end = Math.min(offset + p.size(), all.size());
+            String next = end < all.size()
+                    ? Base64.getUrlEncoder().withoutPadding().encodeToString(("s:" + end + ":" + asOf.toEpochMilli()).getBytes(StandardCharsets.UTF_8))
+                    : "";
+            return new SyncPage<>(new ArrayList<>(all.subList(offset, end)), next, asOf);
         }
     }
 

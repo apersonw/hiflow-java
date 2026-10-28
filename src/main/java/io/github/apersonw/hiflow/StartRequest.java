@@ -23,6 +23,10 @@ public final class StartRequest {
         return new Builder(key);
     }
 
+    boolean idempotent() {
+        return body.get("idempotency_key") instanceof String s && !s.isEmpty();
+    }
+
     Map<String, Object> toBody() {
         return body;
     }
@@ -40,6 +44,12 @@ public final class StartRequest {
 
         /** 业务主键（如请假单号），便于反查实例 */
         public Builder businessKey(String v) { body.put("business_key", v); return this; }
+
+        /**
+         * 幂等键（最长 128 位，如 {@code "leave:" + 请假单号}）：同一客户端下相同的键只发起一次，重复请求返回已发起的实例。
+         * 设置后 {@link HiFlowClient#start} 在网络错误、429 / 5xx 时按客户端的重试配置自动重试。
+         */
+        public Builder idempotencyKey(String v) { body.put("idempotency_key", v); return this; }
 
         /** 实例标题，默认使用流程名称 */
         public Builder title(String v) { body.put("title", v); return this; }
