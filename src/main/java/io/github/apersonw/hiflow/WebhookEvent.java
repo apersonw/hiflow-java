@@ -40,6 +40,8 @@ public record WebhookEvent(String id, String type, OffsetDateTime createdAt, Eve
     public static final String RESOLVE_USERS = "resolve.users";
     /** 服务任务调用回调（发往客户端的回调地址，需同步响应），见 {@link ServiceRequest} */
     public static final String SERVICE_INVOKE = "service.invoke";
+    /** 管理后台“测试回调地址”发送的探测请求（发往客户端的回调地址），校验签名后返回 2xx 即视为连通 */
+    public static final String CALLBACK_TEST = "callback.test";
     public static final String WEBHOOK_TEST = "webhook.test";
 
     static WebhookEvent from(Map<String, Object> m) {

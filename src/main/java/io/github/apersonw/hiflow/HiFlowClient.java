@@ -36,7 +36,7 @@ import java.util.function.LongSupplier;
  * 服务端错误抛出 {@link HiFlowException}，网络错误抛出 {@link UncheckedIOException}。
  */
 public final class HiFlowClient {
-    public static final String VERSION = "0.1.3";
+    public static final String VERSION = "0.1.4";
 
     private final String baseUrl;
     private final String clientId;

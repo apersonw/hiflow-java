@@ -6,7 +6,7 @@ HiFlow 流程引擎 Open API 的 Java 客户端：请求签名、发起流程、
 <dependency>
   <groupId>io.github.apersonw</groupId>
   <artifactId>hiflow-sdk</artifactId>
-  <version>0.1.3</version>
+  <version>0.1.4</version>
 </dependency>
 ```
 

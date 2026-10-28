@@ -6,7 +6,7 @@
 
   <groupId>io.github.apersonw</groupId>
   <artifactId>hiflow-sdk</artifactId>
-  <version>0.1.3</version>
+  <version>0.1.4</version>
   <packaging>jar</packaging>
 
   <name>HiFlow Java SDK</name>
