@@ -23,7 +23,12 @@ public final class MessageRequest {
         return new Builder(message).put("instance_id", instanceId);
     }
 
-    /** 按业务主键发送（同一业务主键有多个流程的实例时用 {@link Builder#key} 限定流程） */
+    /** 按消息启动流程：发起开始节点以该消息启动的流程（有多个时用 {@link Builder#key} 限定），可再用 businessKey 设置业务主键 */
+    public static Builder start(String message) {
+        return new Builder(message);
+    }
+
+    /** 按业务主键发送（同一业务主键有多个流程的实例时用 {@link Builder#key} 限定流程）；没有实例在等待时，以该消息启动的流程会发起新实例 */
     public static Builder byBusinessKey(String businessKey, String message) {
         return new Builder(message).put("business_key", Objects.requireNonNull(businessKey, "businessKey"));
     }

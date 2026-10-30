@@ -36,7 +36,7 @@ import java.util.function.LongSupplier;
  * 服务端错误抛出 {@link HiFlowException}，网络错误抛出 {@link UncheckedIOException}。
  */
 public final class HiFlowClient {
-    public static final String VERSION = "0.1.4";
+    public static final String VERSION = "0.1.7";
 
     private final String baseUrl;
     private final String clientId;
@@ -137,6 +137,38 @@ public final class HiFlowClient {
         body.put("operator", Objects.requireNonNull(operator, "operator"));
         putIfPresent(body, "comment", comment);
         return UrgeResult.from(object(call("POST", "/open/v1/instances/" + id + "/urge", Map.of(), body)));
+    }
+
+    /**
+     * 挂起实例（如业务争议冻结单据）：挂起期间不能处理任务、撤回、催办（抛出 {@link ErrorCodes#INSTANCE_SUSPENDED}），
+     * 定时器、超时、服务任务暂停，子流程一并挂起。reason 必填；只能挂起顶层实例。
+     */
+    public Instance suspend(long id, String reason, String operator) {
+        var body = new LinkedHashMap<String, Object>();
+        body.put("reason", Objects.requireNonNull(reason, "reason"));
+        putIfPresent(body, "operator", operator);
+        return Instance.from(object(call("POST", "/open/v1/instances/" + id + "/suspend", Map.of(), body)));
+    }
+
+    /** 恢复挂起的实例：到期的定时器、超时与服务任务随后执行 */
+    public Instance resume(long id, String reason, String operator) {
+        var body = new LinkedHashMap<String, Object>();
+        putIfPresent(body, "reason", reason);
+        putIfPresent(body, "operator", operator);
+        return Instance.from(object(call("POST", "/open/v1/instances/" + id + "/resume", Map.of(), body)));
+    }
+
+    /**
+     * 修改进行中实例的业务主键（如先用临时单号发起、之后换成正式单号），businessKey 为空表示清除；
+     * 子流程一并更新，内置变量 {@code ${business_key}} 同步更新。子流程实例不能单独修改；
+     * 流程设置了业务主键唯一且新值已有进行中的实例时抛出 {@link ErrorCodes#BUSINESS_KEY_RUNNING}。
+     * 设为同一个值是幂等的，网络失败按配置重试。
+     */
+    public Instance updateBusinessKey(long id, String businessKey, String operator) {
+        var body = new LinkedHashMap<String, Object>();
+        body.put("business_key", businessKey == null ? "" : businessKey);
+        putIfPresent(body, "operator", operator);
+        return Instance.from(object(call("PUT", "/open/v1/instances/" + id + "/business-key", Map.of(), body, true)));
     }
 
     /**
@@ -356,9 +388,21 @@ public final class HiFlowClient {
      * @param pageSize   每页条数；0 为默认
      */
     public Page<CC> ccs(String user, boolean unreadOnly, int page, int pageSize) {
+        return ccs(user, null, unreadOnly, page, pageSize);
+    }
+
+    /**
+     * 查询一页抄送记录（最新的在前），可按所属实例的业务主键筛选。
+     *
+     * @param businessKey 所属实例的业务主键，可为 null
+     */
+    public Page<CC> ccs(String user, String businessKey, boolean unreadOnly, int page, int pageSize) {
         var q = new LinkedHashMap<String, List<String>>();
         if (user != null && !user.isEmpty()) {
             q.put("user", List.of(user));
+        }
+        if (businessKey != null && !businessKey.isEmpty()) {
+            q.put("business_key", List.of(businessKey));
         }
         if (unreadOnly) {
             q.put("unread", List.of("true"));

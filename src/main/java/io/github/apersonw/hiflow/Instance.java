@@ -13,12 +13,15 @@ import java.util.Map;
  * @param parentTaskId     父实例中的子流程任务，否则为 null
  * @param depth            子流程嵌套层数，顶层为 0
  * @param archived         实例已归档（结束超过服务端 archive.after 后移入归档表，只读）；只在详情中有意义
+ * @param suspendedAt      挂起时间，未挂起时为 null：挂起期间不能处理任务，定时器、超时、服务任务暂停
+ * @param suspendReason    挂起原因
  */
 public record Instance(long id, long definitionId, String definitionKey, int definitionVersion, String definitionName,
                        String businessKey, String title, String starter, String status, Map<String, Object> variables,
                        OffsetDateTime startedAt, OffsetDateTime endedAt, String endReason, String result,
                        Long parentInstanceId, Long parentTaskId, int depth,
-                       List<Task> tasks, List<Event> events, List<CC> cc, boolean archived) {
+                       List<Task> tasks, List<Event> events, List<CC> cc, boolean archived,
+                       OffsetDateTime suspendedAt, String suspendReason) {
     public static final String RUNNING = "running";
     public static final String COMPLETED = "completed";
     public static final String CANCELED = "canceled";
@@ -29,6 +32,11 @@ public record Instance(long id, long definitionId, String definitionKey, int def
     /** 实例是否仍在进行 */
     public boolean running() {
         return RUNNING.equals(status);
+    }
+
+    /** 实例是否已挂起 */
+    public boolean suspended() {
+        return suspendedAt != null;
     }
 
     /** 进行中的任务 */
@@ -43,6 +51,6 @@ public record Instance(long id, long definitionId, String definitionKey, int def
                 Models.time(m, "started_at"), Models.time(m, "ended_at"), Json.str(m, "end_reason"),
                 Json.str(m, "result"), Models.optLong(m, "parent_instance_id"), Models.optLong(m, "parent_task_id"), (int) Json.num(m, "depth"),
                 Models.list(m, "tasks", Task::from), Models.list(m, "events", Event::from), Models.list(m, "cc", CC::from),
-                Boolean.TRUE.equals(m.get("archived")));
+                Boolean.TRUE.equals(m.get("archived")), Models.time(m, "suspended_at"), Json.str(m, "suspend_reason"));
     }
 }

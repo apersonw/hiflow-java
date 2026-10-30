@@ -44,6 +44,9 @@ public final class TaskQuery {
 
         public Builder keyword(String v) { return set("keyword", v); }
 
+        /** 所属实例的业务主键（含沿用父流程业务主键的子流程），如单据详情页显示该单据的待办 */
+        public Builder businessKey(String v) { return set("business_key", v); }
+
         public Builder page(int v) { return set("page", v > 0 ? Integer.toString(v) : null); }
 
         public Builder pageSize(int v) { return set("page_size", v > 0 ? Integer.toString(v) : null); }

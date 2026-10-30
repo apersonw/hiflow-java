@@ -19,6 +19,10 @@ public record WebhookEvent(String id, String type, OffsetDateTime createdAt, Eve
     public static final String INSTANCE_STARTED = "instance.started";
     public static final String INSTANCE_COMPLETED = "instance.completed";
     public static final String INSTANCE_CANCELED = "instance.canceled";
+    /** 实例被挂起（comment 为原因） */
+    public static final String INSTANCE_SUSPENDED = "instance.suspended";
+    /** 挂起的实例被恢复 */
+    public static final String INSTANCE_RESUMED = "instance.resumed";
     public static final String TASK_CREATED = "task.created";
     public static final String TASK_COMPLETED = "task.completed";
     public static final String TASK_CANCELED = "task.canceled";

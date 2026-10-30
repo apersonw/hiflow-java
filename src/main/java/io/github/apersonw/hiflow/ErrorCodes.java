@@ -31,6 +31,10 @@ public final class ErrorCodes {
     public static final int RECALL_NOT_ALLOWED = 40905;
     /** 实例中没有进行中的人工待办可催办 */
     public static final int NOTHING_TO_URGE = 40906;
+    /** 流程设置了“同一业务主键只允许一个进行中的实例”，该业务主键已有进行中的实例（消息中带实例 ID） */
+    public static final int BUSINESS_KEY_RUNNING = 40907;
+    /** 实例已挂起，恢复后才能处理任务、撤回、催办 */
+    public static final int INSTANCE_SUSPENDED = 40908;
     public static final int PAYLOAD_TOO_LARGE = 41301;
     /** 流程推进失败（排他网关没有满足条件的出口等），通常是流程变量缺失 */
     public static final int EVALUATE = 42201;
